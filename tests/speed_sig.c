@@ -16,11 +16,39 @@
 #endif
 #include "ds_benchmark.h"
 #include "system_info.c"
+#include "speed_profile_bench.h"
+
+typedef struct {
+        OQS_SIG *sig;
+        uint8_t *public_key;
+        uint8_t *secret_key;
+        uint8_t *message;
+        size_t message_len;
+        uint8_t *signature;
+        size_t *signature_len;
+} speed_sig_context;
+
+static OQS_STATUS sig_keypair_op(void *ctx_) {
+        speed_sig_context *ctx = (speed_sig_context *) ctx_;
+        return OQS_SIG_keypair(ctx->sig, ctx->public_key, ctx->secret_key);
+}
+
+static OQS_STATUS sig_sign_op(void *ctx_) {
+        speed_sig_context *ctx = (speed_sig_context *) ctx_;
+        return OQS_SIG_sign(ctx->sig, ctx->signature, ctx->signature_len, ctx->message, ctx->message_len, ctx->secret_key);
+}
+
+static OQS_STATUS sig_verify_op(void *ctx_) {
+        speed_sig_context *ctx = (speed_sig_context *) ctx_;
+        return OQS_SIG_verify(ctx->sig, ctx->message, ctx->message_len, ctx->signature, *(ctx->signature_len), ctx->public_key);
+}
+
+static OQS_STATUS sig_fullcycle_op(void *ctx_);
 
 static void fullcycle(OQS_SIG *sig, uint8_t *public_key, uint8_t *secret_key, uint8_t *signature, size_t *signature_len, uint8_t *message, size_t message_len) {
-	if (OQS_SIG_keypair(sig, public_key, secret_key) != OQS_SUCCESS) {
-		printf("keygen error. Exiting.\n");
-		exit(-1);
+        if (OQS_SIG_keypair(sig, public_key, secret_key) != OQS_SUCCESS) {
+                printf("keygen error. Exiting.\n");
+                exit(-1);
 	}
 	if (OQS_SIG_sign(sig, signature, signature_len, message, message_len, secret_key) != OQS_SUCCESS) {
 		printf("sign error. Exiting.\n");
@@ -32,9 +60,35 @@ static void fullcycle(OQS_SIG *sig, uint8_t *public_key, uint8_t *secret_key, ui
 	}
 }
 
+static OQS_STATUS sig_fullcycle_op(void *ctx_) {
+        speed_sig_context *ctx = (speed_sig_context *) ctx_;
+        fullcycle(ctx->sig, ctx->public_key, ctx->secret_key, ctx->signature, ctx->signature_len, ctx->message, ctx->message_len);
+        return OQS_SUCCESS;
+}
+
+static bool has_prefix(const char *name, const char *prefix) {
+        if (name == NULL || prefix == NULL) {
+                return false;
+        }
+        size_t prefix_len = strlen(prefix);
+        return strncmp(name, prefix, prefix_len) == 0;
+}
+
+static bool is_ml_dsa_alg(const char *name) {
+        return has_prefix(name, "ML-DSA-") || has_prefix(name, "ml_dsa_");
+}
+
+static bool is_slh_dsa_alg(const char *name) {
+        return has_prefix(name, "SLH-DSA") || has_prefix(name, "SLH_DSA") || has_prefix(name, "slh_dsa");
+}
+
+static bool is_allowed_sig_alg(const char *name) {
+        return is_ml_dsa_alg(name) || is_slh_dsa_alg(name);
+}
+
 static OQS_STATUS sig_speed_wrapper(const char *method_name, uint64_t duration, bool printInfo, bool doFullCycle) {
 
-	OQS_SIG *sig = NULL;
+        OQS_SIG *sig = NULL;
 	uint8_t *public_key = NULL;
 	uint8_t *secret_key = NULL;
 	uint8_t *message = NULL;
@@ -60,14 +114,33 @@ static OQS_STATUS sig_speed_wrapper(const char *method_name, uint64_t duration, 
 
 	OQS_randombytes(message, message_len);
 
-	printf("%-36s | %10s | %14s | %15s | %10s | %25s | %10s\n", sig->method_name, "", "", "", "", "", "");
-	if (!doFullCycle) {
-		TIME_OPERATION_SECONDS(OQS_SIG_keypair(sig, public_key, secret_key), "keypair", duration)
-		TIME_OPERATION_SECONDS(OQS_SIG_sign(sig, signature, &signature_len, message, message_len, secret_key), "sign", duration)
-		TIME_OPERATION_SECONDS(OQS_SIG_verify(sig, message, message_len, signature, signature_len, public_key), "verify", duration)
-	} else {
-		TIME_OPERATION_SECONDS(fullcycle(sig, public_key, secret_key, signature, &signature_len, message, message_len), "fullcycle", duration)
-	}
+        printf("%-36s | %10s | %14s | %15s | %10s | %25s | %10s\n", sig->method_name, "", "", "", "", "", "");
+        speed_sig_context ctx = {
+                .sig = sig,
+                .public_key = public_key,
+                .secret_key = secret_key,
+                .message = message,
+                .message_len = message_len,
+                .signature = signature,
+                .signature_len = &signature_len,
+        };
+        speed_profile_mask_t profile_mask = is_ml_dsa_alg(sig->method_name) ? SPEED_PROFILE_KIND_MLDSA : SPEED_PROFILE_KIND_NONE;
+
+        if (!doFullCycle) {
+                if (speed_profile_run_benchmark("keypair", duration, profile_mask, sig_keypair_op, &ctx) != OQS_SUCCESS) {
+                        goto err;
+                }
+                if (speed_profile_run_benchmark("sign", duration, profile_mask, sig_sign_op, &ctx) != OQS_SUCCESS) {
+                        goto err;
+                }
+                if (speed_profile_run_benchmark("verify", duration, profile_mask, sig_verify_op, &ctx) != OQS_SUCCESS) {
+                        goto err;
+                }
+        } else {
+                if (speed_profile_run_benchmark("fullcycle", duration, profile_mask, sig_fullcycle_op, &ctx) != OQS_SUCCESS) {
+                        goto err;
+                }
+        }
 
 
 	if (printInfo) {
@@ -96,16 +169,20 @@ cleanup:
 }
 
 static OQS_STATUS printAlgs(void) {
-	for (size_t i = 0; i < OQS_SIG_algs_length; i++) {
-		OQS_SIG *sig = OQS_SIG_new(OQS_SIG_alg_identifier(i));
-		if (sig == NULL) {
-			printf("%s (disabled)\n", OQS_SIG_alg_identifier(i));
-		} else {
-			printf("%s\n", OQS_SIG_alg_identifier(i));
-		}
-		OQS_SIG_free(sig);
-	}
-	return OQS_SUCCESS;
+        for (size_t i = 0; i < OQS_SIG_algs_length; i++) {
+                const char *name = OQS_SIG_alg_identifier(i);
+                if (!is_allowed_sig_alg(name)) {
+                        continue;
+                }
+                OQS_SIG *sig = OQS_SIG_new(name);
+                if (sig == NULL) {
+                        printf("%s (disabled)\n", name);
+                } else {
+                        printf("%s\n", name);
+                }
+                OQS_SIG_free(sig);
+        }
+        return OQS_SUCCESS;
 }
 
 int main(int argc, char **argv) {
@@ -157,14 +234,18 @@ int main(int argc, char **argv) {
 		} else if ((strcmp(argv[i], "--fullcycle") == 0) || (strcmp(argv[i], "-f") == 0)) {
 			doFullCycle = true;
 			continue;
-		} else {
-			single_sig = OQS_SIG_new(argv[i]);
-			if (single_sig == NULL) {
-				printUsage = true;
-				break;
-			}
-		}
-	}
+                } else {
+                        single_sig = OQS_SIG_new(argv[i]);
+                        if (single_sig == NULL || !is_allowed_sig_alg(argv[i])) {
+                                if (single_sig != NULL) {
+                                        OQS_SIG_free(single_sig);
+                                }
+                                single_sig = NULL;
+                                printUsage = true;
+                                break;
+                        }
+                }
+        }
 
 	if (printUsage) {
 		fprintf(stderr, "Usage: speed_sig <options> <alg>\n");
@@ -180,10 +261,11 @@ int main(int argc, char **argv) {
 		fprintf(stderr, "--fullcycle\n");
 		fprintf(stderr, " -f                Test full keygen-sign-verify cycle of each SIG\n");
 		fprintf(stderr, "\n");
-		fprintf(stderr, "<alg>              Only run the specified SIG method; must be one of the algorithms output by --algs\n");
-		OQS_destroy();
-		return EXIT_FAILURE;
-	}
+                fprintf(stderr, "<alg>              Only run the specified SIG method; must be one of the algorithms output by --algs\n");
+                fprintf(stderr, "Note: Only ML-DSA and SLH-DSA algorithms are benchmarked by default.\n");
+                OQS_destroy();
+                return EXIT_FAILURE;
+        }
 
 	print_system_info();
 
@@ -191,19 +273,23 @@ int main(int argc, char **argv) {
 	printf("==========\n");
 
 	PRINT_TIMER_HEADER
-	if (single_sig != NULL) {
-		rc = sig_speed_wrapper(single_sig->method_name, duration, printSigInfo, doFullCycle);
-		if (rc != OQS_SUCCESS) {
-			ret = EXIT_FAILURE;
-		}
-		OQS_SIG_free(single_sig);
+        if (single_sig != NULL) {
+                rc = sig_speed_wrapper(single_sig->method_name, duration, printSigInfo, doFullCycle);
+                if (rc != OQS_SUCCESS) {
+                        ret = EXIT_FAILURE;
+                }
+                OQS_SIG_free(single_sig);
 
-	} else {
-		for (size_t i = 0; i < OQS_SIG_algs_length; i++) {
-			rc = sig_speed_wrapper(OQS_SIG_alg_identifier(i), duration, printSigInfo, doFullCycle);
-			if (rc != OQS_SUCCESS) {
-				ret = EXIT_FAILURE;
-			}
+        } else {
+                for (size_t i = 0; i < OQS_SIG_algs_length; i++) {
+                        const char *name = OQS_SIG_alg_identifier(i);
+                        if (!is_allowed_sig_alg(name)) {
+                                continue;
+                        }
+                        rc = sig_speed_wrapper(name, duration, printSigInfo, doFullCycle);
+                        if (rc != OQS_SUCCESS) {
+                                ret = EXIT_FAILURE;
+                        }
 		}
 	}
 	PRINT_TIMER_FOOTER
