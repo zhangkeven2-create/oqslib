@@ -102,8 +102,84 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND BUILD_SHARED_LIBS)
     endif()
 endif()
 
-add_executable(speed_kem speed_kem.c)
+add_executable(speed_kem speed_kem.c
+    speed_profile.c
+    speed_profile_bench.c)
 target_link_libraries(speed_kem PRIVATE ${TEST_DEPS})
+if (NOT WIN32)
+    target_sources(speed_kem PRIVATE speed_wrappers.c)
+    target_compile_definitions(speed_kem PRIVATE SPEED_WRAPPERS_ENABLE_MLKEM SPEED_WRAPPERS_ENABLE_SHA3)
+    set(SPEED_SHA3_WRAP_OPTIONS
+        -Wl,--wrap=OQS_SHA3_sha3_256
+        -Wl,--wrap=OQS_SHA3_sha3_256_inc_init
+        -Wl,--wrap=OQS_SHA3_sha3_256_inc_absorb
+        -Wl,--wrap=OQS_SHA3_sha3_256_inc_finalize
+        -Wl,--wrap=OQS_SHA3_sha3_256_inc_ctx_release
+        -Wl,--wrap=OQS_SHA3_sha3_256_inc_ctx_reset
+        -Wl,--wrap=OQS_SHA3_sha3_256_inc_ctx_clone
+        -Wl,--wrap=OQS_SHA3_sha3_384
+        -Wl,--wrap=OQS_SHA3_sha3_384_inc_init
+        -Wl,--wrap=OQS_SHA3_sha3_384_inc_absorb
+        -Wl,--wrap=OQS_SHA3_sha3_384_inc_finalize
+        -Wl,--wrap=OQS_SHA3_sha3_384_inc_ctx_release
+        -Wl,--wrap=OQS_SHA3_sha3_384_inc_ctx_reset
+        -Wl,--wrap=OQS_SHA3_sha3_384_inc_ctx_clone
+        -Wl,--wrap=OQS_SHA3_sha3_512
+        -Wl,--wrap=OQS_SHA3_sha3_512_inc_init
+        -Wl,--wrap=OQS_SHA3_sha3_512_inc_absorb
+        -Wl,--wrap=OQS_SHA3_sha3_512_inc_finalize
+        -Wl,--wrap=OQS_SHA3_sha3_512_inc_ctx_release
+        -Wl,--wrap=OQS_SHA3_sha3_512_inc_ctx_reset
+        -Wl,--wrap=OQS_SHA3_sha3_512_inc_ctx_clone
+        -Wl,--wrap=OQS_SHA3_shake128
+        -Wl,--wrap=OQS_SHA3_shake128_inc_init
+        -Wl,--wrap=OQS_SHA3_shake128_inc_absorb
+        -Wl,--wrap=OQS_SHA3_shake128_inc_finalize
+        -Wl,--wrap=OQS_SHA3_shake128_inc_squeeze
+        -Wl,--wrap=OQS_SHA3_shake128_inc_ctx_release
+        -Wl,--wrap=OQS_SHA3_shake128_inc_ctx_clone
+        -Wl,--wrap=OQS_SHA3_shake128_inc_ctx_reset
+        -Wl,--wrap=OQS_SHA3_shake256
+        -Wl,--wrap=OQS_SHA3_shake256_inc_init
+        -Wl,--wrap=OQS_SHA3_shake256_inc_absorb
+        -Wl,--wrap=OQS_SHA3_shake256_inc_finalize
+        -Wl,--wrap=OQS_SHA3_shake256_inc_squeeze
+        -Wl,--wrap=OQS_SHA3_shake256_inc_ctx_release
+        -Wl,--wrap=OQS_SHA3_shake256_inc_ctx_clone
+        -Wl,--wrap=OQS_SHA3_shake256_inc_ctx_reset)
+    set(SPEED_MLKEM_WRAP_OPTIONS
+        -Wl,--wrap=PQCP_MLKEM_NATIVE_MLKEM512_C_poly_ntt
+        -Wl,--wrap=PQCP_MLKEM_NATIVE_MLKEM512_X86_64_poly_ntt
+        -Wl,--wrap=PQCP_MLKEM_NATIVE_MLKEM768_C_poly_ntt
+        -Wl,--wrap=PQCP_MLKEM_NATIVE_MLKEM768_X86_64_poly_ntt
+        -Wl,--wrap=PQCP_MLKEM_NATIVE_MLKEM1024_C_poly_ntt
+        -Wl,--wrap=PQCP_MLKEM_NATIVE_MLKEM1024_X86_64_poly_ntt
+        -Wl,--wrap=PQCP_MLKEM_NATIVE_MLKEM512_C_poly_invntt_tomont
+        -Wl,--wrap=PQCP_MLKEM_NATIVE_MLKEM512_X86_64_poly_invntt_tomont
+        -Wl,--wrap=PQCP_MLKEM_NATIVE_MLKEM768_C_poly_invntt_tomont
+        -Wl,--wrap=PQCP_MLKEM_NATIVE_MLKEM768_X86_64_poly_invntt_tomont
+        -Wl,--wrap=PQCP_MLKEM_NATIVE_MLKEM1024_C_poly_invntt_tomont
+        -Wl,--wrap=PQCP_MLKEM_NATIVE_MLKEM1024_X86_64_poly_invntt_tomont)
+    set(SPEED_MLDSA_WRAP_OPTIONS
+        -Wl,--wrap=pqcrystals_ml_dsa_44_ref_poly_ntt
+        -Wl,--wrap=pqcrystals_ml_dsa_44_avx2_poly_ntt
+        -Wl,--wrap=pqcrystals_ml_dsa_65_ref_poly_ntt
+        -Wl,--wrap=pqcrystals_ml_dsa_65_avx2_poly_ntt
+        -Wl,--wrap=pqcrystals_ml_dsa_87_ref_poly_ntt
+        -Wl,--wrap=pqcrystals_ml_dsa_87_avx2_poly_ntt
+        -Wl,--wrap=pqcrystals_ml_dsa_44_ref_poly_invntt_tomont
+        -Wl,--wrap=pqcrystals_ml_dsa_44_ref_invntt_tomont
+        -Wl,--wrap=pqcrystals_ml_dsa_44_avx2_poly_invntt_tomont
+        -Wl,--wrap=pqcrystals_ml_dsa_65_ref_poly_invntt_tomont
+        -Wl,--wrap=pqcrystals_ml_dsa_65_ref_invntt_tomont
+        -Wl,--wrap=pqcrystals_ml_dsa_65_avx2_poly_invntt_tomont
+        -Wl,--wrap=pqcrystals_ml_dsa_87_ref_poly_invntt_tomont
+        -Wl,--wrap=pqcrystals_ml_dsa_87_ref_invntt_tomont
+        -Wl,--wrap=pqcrystals_ml_dsa_87_avx2_poly_invntt_tomont)
+    target_link_options(speed_kem PRIVATE
+        ${SPEED_SHA3_WRAP_OPTIONS}
+        ${SPEED_MLKEM_WRAP_OPTIONS})
+endif()
 
 set(KEM_TESTS example_kem kat_kem test_kem test_kem_mem speed_kem vectors_kem)
 
@@ -166,8 +242,17 @@ endif()
 add_executable(test_sig_mem test_sig_mem.c)
 target_link_libraries(test_sig_mem PRIVATE ${TEST_DEPS})
 
-add_executable(speed_sig speed_sig.c)
+add_executable(speed_sig speed_sig.c
+    speed_profile.c
+    speed_profile_bench.c)
 target_link_libraries(speed_sig PRIVATE ${TEST_DEPS})
+if (NOT WIN32)
+    target_sources(speed_sig PRIVATE speed_wrappers.c)
+    target_compile_definitions(speed_sig PRIVATE SPEED_WRAPPERS_ENABLE_MLDSA SPEED_WRAPPERS_ENABLE_SHA3)
+    target_link_options(speed_sig PRIVATE
+        ${SPEED_SHA3_WRAP_OPTIONS}
+        ${SPEED_MLDSA_WRAP_OPTIONS})
+endif()
 
 
 set(SIG_TESTS example_sig kat_sig test_sig test_sig_mem speed_sig vectors_sig)
